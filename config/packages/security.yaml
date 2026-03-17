@@ -1,0 +1,27 @@
+security:
+  providers:
+    jwt:
+      lexik_jwt:
+        class: MyDashboard\Shared\Security\JwtUser
+
+  firewalls:
+    dev:
+      pattern: ^/(_(profiler|wdt)|css|images|js)/
+      security: false
+
+    health:
+      pattern: ^/translation/health$
+      security: false
+
+    api:
+      pattern: ^/translation/
+      stateless: true
+      provider: jwt
+      jwt: ~
+
+  access_control:
+    - { path: ^/translation/health, roles: PUBLIC_ACCESS }
+    - { path: ^/translation/docs(?:\.json)?$, roles: PUBLIC_ACCESS }
+    - { path: ^/translation/admin, roles: ROLE_ADMIN }
+    - { path: ^/translation/translations, methods: [GET], roles: ROLE_USER }
+    - { path: ^/translation/, roles: ROLE_USER }
