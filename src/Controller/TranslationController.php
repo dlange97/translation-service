@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Entity\Translation;
+use App\Entity\TranslationGroup;
 use App\Repository\TranslationRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -45,16 +46,9 @@ class TranslationController extends AbstractController
      * Returns all translations (full list with IDs) for admin management.
      */
     #[Route('/translation/admin/translations', name: 'translation_admin_list', methods: ['GET'])]
-    public function adminList(Request $request): JsonResponse
+    public function adminList(): JsonResponse
     {
-        $locale = $request->query->get('locale');
-        if ($locale !== null && !in_array($locale, Translation::SUPPORTED_LOCALES, true)) {
-            $locale = null;
-        }
-
-        $items = $this->repo->findAllOrdered($locale);
-
-        return $this->json(array_map(fn(Translation $t) => $this->serialize($t), $items));
+        return $this->json($this->repo->findAllGrouped());
     }
 
     #[Route('/translation/admin/translations', name: 'translation_admin_create', methods: ['POST'])]
@@ -62,23 +56,45 @@ class TranslationController extends AbstractController
     {
         $data = json_decode($request->getContent(), true) ?? [];
 
-        $locale = trim((string) ($data['locale'] ?? 'en'));
         $key = trim((string) ($data['translationKey'] ?? ''));
-        $value = (string) ($data['translationValue'] ?? '');
+        $values = $this->extractValues($data);
 
-        if ($this->repo->findByLocaleAndKey($locale, $key) !== null) {
+        if ($key === '') {
+            return $this->json(['error' => 'Translation key is required.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if ($this->repo->hasAnyForKey($key)) {
             return $this->json(
-                ['error' => sprintf('Translation "%s" for locale "%s" already exists.', $key, $locale)],
+                ['error' => sprintf('Translation "%s" already exists.', $key)],
                 Response::HTTP_CONFLICT,
             );
         }
 
-        $translation = (new Translation())
-            ->setLocale($locale)
-            ->setTranslationKey($key)
-            ->setTranslationValue($value);
+        if ($values['en'] === '' || $values['pl'] === '') {
+            return $this->json(
+                ['error' => 'Both translation values (en, pl) are required.'],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
 
-        $errors = $this->validator->validate($translation);
+        $group = (new TranslationGroup())
+            ->setTranslationKey($key);
+
+        $en = (new Translation())
+            ->setLocale('en')
+            ->setGroup($group)
+            ->setTranslationValue($values['en']);
+
+        $pl = (new Translation())
+            ->setLocale('pl')
+            ->setGroup($group)
+            ->setTranslationValue($values['pl']);
+
+        $errors = [
+            ...iterator_to_array($this->validator->validate($group)),
+            ...iterator_to_array($this->validator->validate($en)),
+            ...iterator_to_array($this->validator->validate($pl)),
+        ];
         if (count($errors) > 0) {
             $messages = [];
             foreach ($errors as $error) {
@@ -87,45 +103,67 @@ class TranslationController extends AbstractController
             return $this->json(['errors' => $messages], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->repo->save($translation, true);
+        $this->em->persist($group);
+        $this->repo->save($en);
+        $this->repo->save($pl, true);
 
-        return $this->json($this->serialize($translation), Response::HTTP_CREATED);
+        return $this->json($this->serializeGrouped($key, $en, $pl), Response::HTTP_CREATED);
     }
 
-    #[Route('/translation/admin/translations/{id}', name: 'translation_admin_update', methods: ['PUT'])]
-    public function update(int $id, Request $request): JsonResponse
+    #[Route('/translation/admin/translations/{key}', name: 'translation_admin_update', methods: ['PUT'])]
+    public function update(string $key, Request $request): JsonResponse
     {
-        $translation = $this->repo->find($id);
-        if ($translation === null) {
+        $decodedKey = trim(rawurldecode($key));
+        if ($decodedKey === '') {
+            return $this->json(['error' => 'Translation key is required.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $en = $this->repo->findByLocaleAndKey('en', $decodedKey);
+        $pl = $this->repo->findByLocaleAndKey('pl', $decodedKey);
+        if ($en === null && $pl === null) {
             return $this->json(['error' => 'Translation not found.'], Response::HTTP_NOT_FOUND);
         }
 
         $data = json_decode($request->getContent(), true) ?? [];
+        $values = $this->extractValues($data);
 
-        if (isset($data['translationKey'])) {
-            $newKey = trim((string) $data['translationKey']);
-            $newLocale = isset($data['locale']) ? trim((string) $data['locale']) : $translation->getLocale();
-            // Check uniqueness only if key or locale changed
-            if ($newKey !== $translation->getTranslationKey() || $newLocale !== $translation->getLocale()) {
-                $existing = $this->repo->findByLocaleAndKey($newLocale, $newKey);
-                if ($existing !== null && $existing->getId() !== $id) {
-                    return $this->json(
-                        ['error' => sprintf('Translation "%s" for locale "%s" already exists.', $newKey, $newLocale)],
-                        Response::HTTP_CONFLICT,
-                    );
-                }
-            }
-            $translation->setTranslationKey($newKey);
-            if (isset($data['locale'])) {
-                $translation->setLocale($newLocale);
-            }
+        $translationGroup = $en?->getGroup() ?? $pl?->getGroup();
+        if ($translationGroup === null) {
+            return $this->json(['error' => 'Translation group not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        if (isset($data['translationValue'])) {
-            $translation->setTranslationValue((string) $data['translationValue']);
+        if ($en === null) {
+            $en = (new Translation())
+                ->setLocale('en')
+                ->setGroup($translationGroup);
         }
 
-        $errors = $this->validator->validate($translation);
+        if ($pl === null) {
+            $pl = (new Translation())
+                ->setLocale('pl')
+                ->setGroup($translationGroup);
+        }
+
+        if ($values['en'] !== '') {
+            $en->setTranslationValue($values['en']);
+        }
+
+        if ($values['pl'] !== '') {
+            $pl->setTranslationValue($values['pl']);
+        }
+
+        if ($en->getTranslationValue() === '' || $pl->getTranslationValue() === '') {
+            return $this->json(
+                ['error' => 'Both translation values (en, pl) are required.'],
+                Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        }
+
+        $errors = [
+            ...iterator_to_array($this->validator->validate($translationGroup)),
+            ...iterator_to_array($this->validator->validate($en)),
+            ...iterator_to_array($this->validator->validate($pl)),
+        ];
         if (count($errors) > 0) {
             $messages = [];
             foreach ($errors as $error) {
@@ -134,34 +172,59 @@ class TranslationController extends AbstractController
             return $this->json(['errors' => $messages], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->em->flush();
+        $this->repo->save($en);
+        $this->repo->save($pl, true);
 
-        return $this->json($this->serialize($translation));
+        return $this->json($this->serializeGrouped($decodedKey, $en, $pl));
     }
 
-    #[Route('/translation/admin/translations/{id}', name: 'translation_admin_delete', methods: ['DELETE'])]
-    public function delete(int $id): JsonResponse
+    #[Route('/translation/admin/translations/{key}', name: 'translation_admin_delete', methods: ['DELETE'])]
+    public function delete(string $key): JsonResponse
     {
-        $translation = $this->repo->find($id);
-        if ($translation === null) {
+        $decodedKey = trim(rawurldecode($key));
+        if ($decodedKey === '') {
+            return $this->json(['error' => 'Translation key is required.'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $deleted = $this->repo->deleteByKey($decodedKey);
+        if ($deleted === 0) {
             return $this->json(['error' => 'Translation not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        $this->repo->remove($translation, true);
+        $this->em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
     }
 
+    /**
+     * @param array<string, mixed> $data
+     * @return array{en: string, pl: string}
+     */
+    private function extractValues(array $data): array
+    {
+        $rawValues = $data['values'] ?? [];
+        $en = trim((string) ($rawValues['en'] ?? $data['translationValueEn'] ?? ''));
+        $pl = trim((string) ($rawValues['pl'] ?? $data['translationValuePl'] ?? ''));
+
+        return ['en' => $en, 'pl' => $pl];
+    }
+
     /** @return array<string, mixed> */
-    private function serialize(Translation $t): array
+    private function serializeGrouped(string $key, ?Translation $en, ?Translation $pl): array
     {
         return [
-            'id'               => $t->getId(),
-            'locale'           => $t->getLocale(),
-            'translationKey'   => $t->getTranslationKey(),
-            'translationValue' => $t->getTranslationValue(),
-            'createdAt'        => $t->getCreatedAt()?->format('c'),
-            'updatedAt'        => $t->getUpdatedAt()?->format('c'),
+            'groupId' => $en?->getGroup()?->getId() ?? $pl?->getGroup()?->getId(),
+            'translationKey' => $key,
+            'values' => [
+                'en' => $en?->getTranslationValue() ?? '',
+                'pl' => $pl?->getTranslationValue() ?? '',
+            ],
+            'ids' => [
+                'en' => $en?->getId(),
+                'pl' => $pl?->getId(),
+            ],
+            'createdAt' => $en?->getCreatedAt()?->format('c') ?? $pl?->getCreatedAt()?->format('c'),
+            'updatedAt' => $en?->getUpdatedAt()?->format('c') ?? $pl?->getUpdatedAt()?->format('c'),
         ];
     }
 }

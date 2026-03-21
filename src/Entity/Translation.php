@@ -11,7 +11,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: TranslationRepository::class)]
 #[ORM\Table(name: 'translation')]
-#[ORM\UniqueConstraint(name: 'UNQ_LOCALE_KEY', columns: ['locale', 'translation_key'])]
+#[ORM\UniqueConstraint(name: 'UNQ_LOCALE_GROUP', columns: ['locale', 'translation_group_id'])]
 #[ORM\HasLifecycleCallbacks]
 class Translation
 {
@@ -27,10 +27,10 @@ class Translation
     #[Assert\Choice(choices: self::SUPPORTED_LOCALES, message: 'Locale must be one of: en, pl.')]
     private string $locale = 'en';
 
-    #[ORM\Column(type: Types::STRING, length: 200)]
-    #[Assert\NotBlank(message: 'Translation key is required.')]
-    #[Assert\Length(max: 200)]
-    private string $translationKey = '';
+    #[ORM\ManyToOne(targetEntity: TranslationGroup::class)]
+    #[ORM\JoinColumn(name: 'translation_group_id', referencedColumnName: 'id', nullable: false, onDelete: 'CASCADE')]
+    #[Assert\NotNull(message: 'Translation group is required.')]
+    private ?TranslationGroup $group = null;
 
     #[ORM\Column(type: Types::TEXT)]
     #[Assert\NotBlank(message: 'Translation value is required.')]
@@ -58,15 +58,21 @@ class Translation
         return $this;
     }
 
-    public function getTranslationKey(): string
+    public function getGroup(): ?TranslationGroup
     {
-        return $this->translationKey;
+        return $this->group;
     }
 
-    public function setTranslationKey(string $key): static
+    public function setGroup(TranslationGroup $group): static
     {
-        $this->translationKey = trim($key);
+        $this->group = $group;
+
         return $this;
+    }
+
+    public function getTranslationKey(): string
+    {
+        return $this->group?->getTranslationKey() ?? '';
     }
 
     public function getTranslationValue(): string

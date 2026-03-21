@@ -11,23 +11,37 @@ final class Version20260317000001 extends AbstractMigration
 {
     public function getDescription(): string
     {
-        return 'Create translation table and seed default EN/PL translations';
+        return 'Create translation_group + translation tables and seed default EN/PL translations';
     }
 
     public function up(Schema $schema): void
     {
         $this->addSql(<<<'SQL'
-            CREATE TABLE translation (
-                id                INT AUTO_INCREMENT NOT NULL,
-                locale            VARCHAR(5)   NOT NULL,
-                translation_key   VARCHAR(200) NOT NULL,
-                translation_value LONGTEXT     NOT NULL,
-                created_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                updated_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                UNIQUE INDEX UNQ_LOCALE_KEY (locale, translation_key),
+            CREATE TABLE translation_group (
+                id              INT AUTO_INCREMENT NOT NULL,
+                translation_key VARCHAR(200) NOT NULL,
+                created_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                updated_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                UNIQUE INDEX UNQ_TRANSLATION_GROUP_KEY (translation_key),
                 PRIMARY KEY (id)
             ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
         SQL);
+
+        $this->addSql(<<<'SQL'
+            CREATE TABLE translation (
+                id                INT AUTO_INCREMENT NOT NULL,
+                translation_group_id INT NOT NULL,
+                locale            VARCHAR(5)   NOT NULL,
+                translation_value LONGTEXT     NOT NULL,
+                created_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                updated_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                UNIQUE INDEX UNQ_LOCALE_GROUP (locale, translation_group_id),
+                INDEX IDX_TRANSLATION_GROUP (translation_group_id),
+                PRIMARY KEY (id)
+            ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
+        SQL);
+
+        $this->addSql('ALTER TABLE translation ADD CONSTRAINT FK_TRANSLATION_GROUP FOREIGN KEY (translation_group_id) REFERENCES translation_group (id) ON DELETE CASCADE');
 
         $now = date('Y-m-d H:i:s');
 
@@ -43,6 +57,8 @@ final class Version20260317000001 extends AbstractMigration
             ['pl', 'nav.shopping',    'Zakupy'],
             ['en', 'nav.events',      'My Events'],
             ['pl', 'nav.events',      'Moje Wydarzenia'],
+            ['en', 'nav.calendar',    'Calendar'],
+            ['pl', 'nav.calendar',    'Kalendarz'],
             ['en', 'nav.map',         'Map'],
             ['pl', 'nav.map',         'Mapa'],
             ['en', 'nav.users',       'Users'],
@@ -161,6 +177,74 @@ final class Version20260317000001 extends AbstractMigration
             ['pl', 'dashboard.title',   'Panel'],
             ['en', 'dashboard.welcome', 'Welcome back'],
             ['pl', 'dashboard.welcome', 'Witaj z powrotem'],
+            ['en', 'dashboard.welcomeBack', 'Welcome back'],
+            ['pl', 'dashboard.welcomeBack', 'Witaj ponownie'],
+            ['en', 'dashboard.overview', 'Here\'s your overview.'],
+            ['pl', 'dashboard.overview', 'Oto Twój przegląd.'],
+            ['en', 'dashboard.calendarTitle', 'Calendar'],
+            ['pl', 'dashboard.calendarTitle', 'Kalendarz'],
+            ['en', 'dashboard.openCalendar', 'Open calendar'],
+            ['pl', 'dashboard.openCalendar', 'Otwórz kalendarz'],
+            ['en', 'dashboard.calendarMonthCount', 'Events this month'],
+            ['pl', 'dashboard.calendarMonthCount', 'Wydarzenia w tym miesiącu'],
+            ['en', 'dashboard.guest', 'there'],
+            ['pl', 'dashboard.guest', 'tam'],
+            ['en', 'dashboard.reorderHint', 'Drag to reorder'],
+            ['pl', 'dashboard.reorderHint', 'Przeciągnij, aby zmienić kolejność'],
+            ['en', 'dashboard.resetTiles', 'Reset tile settings'],
+            ['pl', 'dashboard.resetTiles', 'Resetuj ustawienia kafelków'],
+            ['en', 'dashboard.scaleUp', 'Increase tile size'],
+            ['pl', 'dashboard.scaleUp', 'Powiększ kafelek'],
+            ['en', 'dashboard.scaleDown', 'Decrease tile size'],
+            ['pl', 'dashboard.scaleDown', 'Pomniejsz kafelek'],
+            // ── Events ───────────────────────────────────────────────────────
+            ['en', 'events.pageTitle', '📅 My Events'],
+            ['pl', 'events.pageTitle', '📅 Moje Wydarzenia'],
+            ['en', 'events.viewList', 'List'],
+            ['pl', 'events.viewList', 'Lista'],
+            ['en', 'events.viewCalendar', 'Calendar'],
+            ['pl', 'events.viewCalendar', 'Kalendarz'],
+            ['en', 'events.add', 'Add Event'],
+            ['pl', 'events.add', 'Dodaj wydarzenie'],
+            ['en', 'events.addButton', '+ Add Event'],
+            ['pl', 'events.addButton', '+ Dodaj wydarzenie'],
+            ['en', 'events.missingManagePermission', 'Missing permission: events.manage'],
+            ['pl', 'events.missingManagePermission', 'Brak uprawnienia: events.manage'],
+            ['en', 'events.empty', 'No events yet. Click'],
+            ['pl', 'events.empty', 'Brak wydarzeń. Kliknij'],
+            ['en', 'events.emptySuffix', 'to create one.'],
+            ['pl', 'events.emptySuffix', 'aby utworzyć pierwsze.'],
+            ['en', 'events.viewAll', 'View all'],
+            ['pl', 'events.viewAll', 'Zobacz wszystkie'],
+            ['en', 'events.noUpcoming', 'No upcoming events.'],
+            ['pl', 'events.noUpcoming', 'Brak nadchodzących wydarzeń.'],
+            // ── Calendar ─────────────────────────────────────────────────────
+            ['en', 'calendar.pageTitle', 'Calendar'],
+            ['pl', 'calendar.pageTitle', 'Kalendarz'],
+            ['en', 'calendar.allDay', 'All day'],
+            ['pl', 'calendar.allDay', 'Cały dzień'],
+            ['en', 'calendar.previous', 'Previous'],
+            ['pl', 'calendar.previous', 'Poprzedni'],
+            ['en', 'calendar.next', 'Next'],
+            ['pl', 'calendar.next', 'Następny'],
+            ['en', 'calendar.today', 'Today'],
+            ['pl', 'calendar.today', 'Dziś'],
+            ['en', 'calendar.month', 'Month'],
+            ['pl', 'calendar.month', 'Miesiąc'],
+            ['en', 'calendar.week', 'Week'],
+            ['pl', 'calendar.week', 'Tydzień'],
+            ['en', 'calendar.day', 'Day'],
+            ['pl', 'calendar.day', 'Dzień'],
+            ['en', 'calendar.agenda', 'Agenda'],
+            ['pl', 'calendar.agenda', 'Agenda'],
+            ['en', 'calendar.date', 'Date'],
+            ['pl', 'calendar.date', 'Data'],
+            ['en', 'calendar.time', 'Time'],
+            ['pl', 'calendar.time', 'Godzina'],
+            ['en', 'calendar.event', 'Event'],
+            ['pl', 'calendar.event', 'Wydarzenie'],
+            ['en', 'calendar.emptyRange', 'No events in this range.'],
+            ['pl', 'calendar.emptyRange', 'Brak wydarzeń w tym zakresie.'],
             // ── Translations admin ───────────────────────────────────────────
             ['en', 'translations.title',         'Translation Keys'],
             ['pl', 'translations.title',         'Klucze tłumaczeń'],
@@ -211,11 +295,25 @@ final class Version20260317000001 extends AbstractMigration
             ['pl', 'common.search',   'Szukaj'],
         ];
 
+        $groupIds = [];
+        foreach ($translations as [$locale, $key, $value]) {
+            if (!isset($groupIds[$key])) {
+                $escapedKey = str_replace("'", "\\'", $key);
+                $this->addSql(
+                    "INSERT INTO translation_group (translation_key, created_at, updated_at) VALUES ('{$escapedKey}', '{$now}', '{$now}')"
+                );
+
+                $groupIds[$key] = true;
+            }
+        }
+
         foreach ($translations as [$locale, $key, $value]) {
             $escapedValue = str_replace("'", "\\'", $value);
+            $escapedKey = str_replace("'", "\\'", $key);
             $this->addSql(
-                "INSERT INTO translation (locale, translation_key, translation_value, created_at, updated_at) "
-                . "VALUES ('{$locale}', '{$key}', '{$escapedValue}', '{$now}', '{$now}')"
+                "INSERT INTO translation (translation_group_id, locale, translation_value, created_at, updated_at) "
+                . "SELECT id, '{$locale}', '{$escapedValue}', '{$now}', '{$now}' "
+                . "FROM translation_group WHERE translation_key = '{$escapedKey}'"
             );
         }
     }
@@ -223,5 +321,6 @@ final class Version20260317000001 extends AbstractMigration
     public function down(Schema $schema): void
     {
         $this->addSql('DROP TABLE translation');
+        $this->addSql('DROP TABLE translation_group');
     }
 }
