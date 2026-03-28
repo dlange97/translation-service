@@ -23,9 +23,18 @@ echo "=== JWT public key found ==="
 
 cd /app
 
-if [ ! -f vendor/autoload.php ] || ! php -r "require 'vendor/autoload.php'; exit(class_exists('Symfony\\Component\\ExpressionLanguage\\ExpressionLanguage') ? 0 : 1);"; then
+needs_composer_install() {
+    if [ ! -f vendor/autoload.php ]; then
+        return 0
+    fi
+
+    php -r "require 'vendor/autoload.php';" >/dev/null 2>&1 || return 0
+    return 1
+}
+
+if needs_composer_install; then
     echo "Installing dependencies..."
-    composer install --no-interaction --optimize-autoloader || true
+    composer install --no-interaction --optimize-autoloader
 fi
 
 php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration || true
