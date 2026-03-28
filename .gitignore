@@ -1,20 +1,42 @@
 
-###> symfony/framework-bundle ###
+# Dependencies & build output
+/vendor/
+/var/
+/public/bundles/
+
+# Symfony secrets
+/config/secrets/prod/prod.decrypt.private.php
+
+# Environment files
 /.env.dev
+/.env.test
 /.env.local
 /.env.local.php
 /.env.*.local
-/config/secrets/prod/prod.decrypt.private.php
-/public/bundles/
-/var/
-/vendor/
-###< symfony/framework-bundle ###
 
-###> lexik/jwt-authentication-bundle ###
+# JWT keys
 /config/jwt/*.pem
-###< lexik/jwt-authentication-bundle ###
 
-###> phpunit/phpunit ###
+# IDE / Editor
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker local overrides
+compose.override.yaml
+
+# PHPUnit
 /phpunit.xml
 /.phpunit.cache/
-###< phpunit/phpunit ###
+
+# Test output
+/test-output/
