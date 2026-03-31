@@ -22,3 +22,13 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+    # ── Instance ID request listener ─────────────────────────
+    App\EventListener\InstanceRequestListener:
+        tags:
+            - { name: kernel.event_listener, event: kernel.request, method: onKernelRequest, priority: 20 }
+
+    # ── Instance ID Doctrine listener ────────────────────────
+    App\EventListener\InstanceDoctrineListener:
+        tags:
+            - { name: doctrine.event_listener, event: prePersist }

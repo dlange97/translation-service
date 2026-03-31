@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Repository\TranslationRepository;
+use App\Traits\HasInstanceId;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
@@ -15,6 +16,8 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\HasLifecycleCallbacks]
 class Translation
 {
+    use HasInstanceId;
+
     public const SUPPORTED_LOCALES = ['en', 'pl'];
 
     #[ORM\Id]
