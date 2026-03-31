@@ -16,8 +16,12 @@ final class Version20260331000001 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE translation ADD instance_id VARCHAR(36) DEFAULT NULL');
-        $this->addSql('ALTER TABLE translation_group ADD instance_id VARCHAR(36) DEFAULT NULL');
+        if ($schema->hasTable('translation') && !$schema->getTable('translation')->hasColumn('instance_id')) {
+            $this->addSql('ALTER TABLE translation ADD instance_id VARCHAR(36) DEFAULT NULL');
+        }
+        if ($schema->hasTable('translation_group') && !$schema->getTable('translation_group')->hasColumn('instance_id')) {
+            $this->addSql('ALTER TABLE translation_group ADD instance_id VARCHAR(36) DEFAULT NULL');
+        }
     }
 
     public function down(Schema $schema): void

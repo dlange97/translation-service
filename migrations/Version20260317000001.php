@@ -16,32 +16,35 @@ final class Version20260317000001 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql(<<<'SQL'
-            CREATE TABLE translation_group (
-                id              INT AUTO_INCREMENT NOT NULL,
-                translation_key VARCHAR(200) NOT NULL,
-                created_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                updated_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                UNIQUE INDEX UNQ_TRANSLATION_GROUP_KEY (translation_key),
-                PRIMARY KEY (id)
-            ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
-        SQL);
+        if (!$schema->hasTable('translation_group')) {
+            $this->addSql(<<<'SQL'
+                CREATE TABLE translation_group (
+                    id              INT AUTO_INCREMENT NOT NULL,
+                    translation_key VARCHAR(200) NOT NULL,
+                    created_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                    updated_at      DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                    UNIQUE INDEX UNQ_TRANSLATION_GROUP_KEY (translation_key),
+                    PRIMARY KEY (id)
+                ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
+            SQL);
+        }
 
-        $this->addSql(<<<'SQL'
-            CREATE TABLE translation (
-                id                INT AUTO_INCREMENT NOT NULL,
-                translation_group_id INT NOT NULL,
-                locale            VARCHAR(5)   NOT NULL,
-                translation_value LONGTEXT     NOT NULL,
-                created_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                updated_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
-                UNIQUE INDEX UNQ_LOCALE_GROUP (locale, translation_group_id),
-                INDEX IDX_TRANSLATION_GROUP (translation_group_id),
-                PRIMARY KEY (id)
-            ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
-        SQL);
-
-        $this->addSql('ALTER TABLE translation ADD CONSTRAINT FK_TRANSLATION_GROUP FOREIGN KEY (translation_group_id) REFERENCES translation_group (id) ON DELETE CASCADE');
+        if (!$schema->hasTable('translation')) {
+            $this->addSql(<<<'SQL'
+                CREATE TABLE translation (
+                    id                INT AUTO_INCREMENT NOT NULL,
+                    translation_group_id INT NOT NULL,
+                    locale            VARCHAR(5)   NOT NULL,
+                    translation_value LONGTEXT     NOT NULL,
+                    created_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                    updated_at        DATETIME     NOT NULL COMMENT '(DC2Type:datetime_immutable)',
+                    UNIQUE INDEX UNQ_LOCALE_GROUP (locale, translation_group_id),
+                    INDEX IDX_TRANSLATION_GROUP (translation_group_id),
+                    PRIMARY KEY (id)
+                ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB
+            SQL);
+            $this->addSql('ALTER TABLE translation ADD CONSTRAINT FK_TRANSLATION_GROUP FOREIGN KEY (translation_group_id) REFERENCES translation_group (id) ON DELETE CASCADE');
+        }
 
         $now = date('Y-m-d H:i:s');
 
@@ -493,7 +496,7 @@ final class Version20260317000001 extends AbstractMigration
             if (!isset($groupIds[$key])) {
                 $escapedKey = str_replace("'", "\\'", $key);
                 $this->addSql(
-                    "INSERT INTO translation_group (translation_key, created_at, updated_at) VALUES ('{$escapedKey}', '{$now}', '{$now}')"
+                    "INSERT IGNORE INTO translation_group (translation_key, created_at, updated_at) VALUES ('{$escapedKey}', '{$now}', '{$now}')"
                 );
 
                 $groupIds[$key] = true;
@@ -504,7 +507,7 @@ final class Version20260317000001 extends AbstractMigration
             $escapedValue = str_replace("'", "\\'", $value);
             $escapedKey = str_replace("'", "\\'", $key);
             $this->addSql(
-                "INSERT INTO translation (translation_group_id, locale, translation_value, created_at, updated_at) "
+                "INSERT IGNORE INTO translation (translation_group_id, locale, translation_value, created_at, updated_at) "
                 . "SELECT id, '{$locale}', '{$escapedValue}', '{$now}', '{$now}' "
                 . "FROM translation_group WHERE translation_key = '{$escapedKey}'"
             );
