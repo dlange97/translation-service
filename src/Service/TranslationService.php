@@ -7,6 +7,7 @@ namespace App\Service;
 use App\Entity\Translation;
 use App\Entity\TranslationGroup;
 use App\Repository\TranslationRepository;
+use App\Service\Locale\LocaleStrategyInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -19,23 +20,22 @@ final class TranslationService
         private readonly TranslationRepository $repo,
         private readonly EntityManagerInterface $em,
         private readonly ValidatorInterface $validator,
+        private readonly LocaleStrategyInterface $localeStrategy,
     ) {
     }
 
     /** @return array<string, string> */
     public function getFlatMap(string $locale): array
     {
-        if (!in_array($locale, Translation::SUPPORTED_LOCALES, true)) {
-            $locale = 'en';
-        }
-
-        return $this->repo->getFlatMapByLocale($locale);
+        return $this->repo->getFlatMapByLocale(
+            $this->localeStrategy->normalizeRequestedLocale($locale),
+        );
     }
 
     /** @return list<array<string, mixed>> */
     public function findAllGrouped(): array
     {
-        return $this->repo->findAllGrouped();
+        return $this->repo->findAllGrouped($this->localeStrategy->supportedLocales());
     }
 
     /**
@@ -45,8 +45,9 @@ final class TranslationService
      */
     public function create(array $data): array
     {
-        $key    = trim((string) ($data['translationKey'] ?? ''));
+        $key = trim((string) ($data['translationKey'] ?? ''));
         $values = $this->extractValues($data);
+        $locales = $this->localeStrategy->supportedLocales();
 
         if ($key === '') {
             throw new UnprocessableEntityHttpException('Translation key is required.');
@@ -56,29 +57,39 @@ final class TranslationService
             throw new ConflictHttpException(sprintf('Translation "%s" already exists.', $key));
         }
 
-        if ($values['en'] === '' || $values['pl'] === '') {
-            throw new UnprocessableEntityHttpException('Both translation values (en, pl) are required.');
+        $missingLocales = array_values(array_filter(
+            $locales,
+            static fn(string $locale): bool => ($values[$locale] ?? '') === '',
+        ));
+        if ($missingLocales !== []) {
+            throw new UnprocessableEntityHttpException(sprintf(
+                'Translation values are required for locales: %s.',
+                implode(', ', $missingLocales),
+            ));
         }
 
         $group = (new TranslationGroup())->setTranslationKey($key);
+        $translationsByLocale = [];
 
-        $en = (new Translation())
-            ->setLocale('en')
-            ->setGroup($group)
-            ->setTranslationValue($values['en']);
+        foreach ($locales as $locale) {
+            $translationsByLocale[$locale] = (new Translation())
+                ->setLocale($locale)
+                ->setGroup($group)
+                ->setTranslationValue($values[$locale]);
+        }
 
-        $pl = (new Translation())
-            ->setLocale('pl')
-            ->setGroup($group)
-            ->setTranslationValue($values['pl']);
-
-        $this->validateEntities($group, $en, $pl);
+        $this->validateEntities($group, array_values($translationsByLocale));
 
         $this->em->persist($group);
-        $this->repo->save($en);
-        $this->repo->save($pl, true);
 
-        return $this->serializeGrouped($key, $en, $pl);
+        $total = count($translationsByLocale);
+        $index = 0;
+        foreach ($translationsByLocale as $translation) {
+            ++$index;
+            $this->repo->save($translation, $index === $total);
+        }
+
+        return $this->serializeGrouped($key, $translationsByLocale);
     }
 
     /**
@@ -93,49 +104,55 @@ final class TranslationService
             throw new UnprocessableEntityHttpException('Translation key is required.');
         }
 
-        $en = $this->repo->findByLocaleAndKey('en', $decodedKey);
-        $pl = $this->repo->findByLocaleAndKey('pl', $decodedKey);
-        if ($en === null && $pl === null) {
+        $existingByLocale = $this->repo->findByKeyIndexedByLocale($decodedKey);
+        if ($existingByLocale === []) {
             throw new NotFoundHttpException('Translation not found.');
         }
 
         $values = $this->extractValues($data);
+        $locales = $this->localeStrategy->supportedLocales();
 
-        $translationGroup = $en?->getGroup() ?? $pl?->getGroup();
+        $sampleTranslation = reset($existingByLocale);
+        $translationGroup = $sampleTranslation instanceof Translation ? $sampleTranslation->getGroup() : null;
         if ($translationGroup === null) {
             throw new NotFoundHttpException('Translation group not found.');
         }
 
-        if ($en === null) {
-            $en = (new Translation())
-                ->setLocale('en')
+        $translationsByLocale = [];
+        $missingLocales = [];
+        foreach ($locales as $locale) {
+            $translation = $existingByLocale[$locale] ?? (new Translation())
+                ->setLocale($locale)
                 ->setGroup($translationGroup);
+
+            if (($values[$locale] ?? '') !== '') {
+                $translation->setTranslationValue($values[$locale]);
+            }
+
+            if ($translation->getTranslationValue() === '') {
+                $missingLocales[] = $locale;
+            }
+
+            $translationsByLocale[$locale] = $translation;
         }
 
-        if ($pl === null) {
-            $pl = (new Translation())
-                ->setLocale('pl')
-                ->setGroup($translationGroup);
+        if ($missingLocales !== []) {
+            throw new UnprocessableEntityHttpException(sprintf(
+                'Translation values are required for locales: %s.',
+                implode(', ', $missingLocales),
+            ));
         }
 
-        if ($values['en'] !== '') {
-            $en->setTranslationValue($values['en']);
+        $this->validateEntities($translationGroup, array_values($translationsByLocale));
+
+        $total = count($translationsByLocale);
+        $index = 0;
+        foreach ($translationsByLocale as $translation) {
+            ++$index;
+            $this->repo->save($translation, $index === $total);
         }
 
-        if ($values['pl'] !== '') {
-            $pl->setTranslationValue($values['pl']);
-        }
-
-        if ($en->getTranslationValue() === '' || $pl->getTranslationValue() === '') {
-            throw new UnprocessableEntityHttpException('Both translation values (en, pl) are required.');
-        }
-
-        $this->validateEntities($translationGroup, $en, $pl);
-
-        $this->repo->save($en);
-        $this->repo->save($pl, true);
-
-        return $this->serializeGrouped($decodedKey, $en, $pl);
+        return $this->serializeGrouped($decodedKey, $translationsByLocale);
     }
 
     /**
@@ -158,43 +175,75 @@ final class TranslationService
 
     /**
      * @param array<string, mixed> $data
-     * @return array{en: string, pl: string}
+     * @return array<string, string>
      */
     public function extractValues(array $data): array
     {
-        $rawValues = $data['values'] ?? [];
-        $en = trim((string) ($rawValues['en'] ?? $data['translationValueEn'] ?? ''));
-        $pl = trim((string) ($rawValues['pl'] ?? $data['translationValuePl'] ?? ''));
+        $locales = $this->localeStrategy->supportedLocales();
+        $rawValues = is_array($data['values'] ?? null) ? $data['values'] : [];
+        $values = [];
 
-        return ['en' => $en, 'pl' => $pl];
+        foreach ($locales as $locale) {
+            $legacyKey = 'translationValue' . $this->legacyLocaleSuffix($locale);
+            $values[$locale] = trim((string) ($rawValues[$locale] ?? $data[$legacyKey] ?? ''));
+        }
+
+        return $values;
     }
 
-    /** @return array<string, mixed> */
-    public function serializeGrouped(string $key, ?Translation $en, ?Translation $pl): array
+    /**
+     * @param array<string, Translation|null> $translationsByLocale
+     * @return array<string, mixed>
+     */
+    public function serializeGrouped(string $key, array $translationsByLocale): array
     {
+        $locales = $this->localeStrategy->supportedLocales();
+        $values = array_fill_keys($locales, '');
+        $ids = array_fill_keys($locales, null);
+        $groupId = null;
+        $createdAt = null;
+        $updatedAt = null;
+
+        foreach ($translationsByLocale as $locale => $translation) {
+            if (!$translation instanceof Translation) {
+                continue;
+            }
+
+            if (!array_key_exists($locale, $values)) {
+                $values[$locale] = '';
+                $ids[$locale] = null;
+            }
+
+            $groupId ??= $translation->getGroup()?->getId();
+            $values[$locale] = $translation->getTranslationValue();
+            $ids[$locale] = $translation->getId();
+            $createdAt ??= $translation->getCreatedAt()?->format('c');
+            $updatedAt = $translation->getUpdatedAt()?->format('c') ?? $updatedAt;
+        }
+
         return [
-            'groupId'        => $en?->getGroup()?->getId() ?? $pl?->getGroup()?->getId(),
+            'groupId'        => $groupId,
             'translationKey' => $key,
-            'values'         => [
-                'en' => $en?->getTranslationValue() ?? '',
-                'pl' => $pl?->getTranslationValue() ?? '',
-            ],
-            'ids' => [
-                'en' => $en?->getId(),
-                'pl' => $pl?->getId(),
-            ],
-            'createdAt' => $en?->getCreatedAt()?->format('c') ?? $pl?->getCreatedAt()?->format('c'),
-            'updatedAt' => $en?->getUpdatedAt()?->format('c') ?? $pl?->getUpdatedAt()?->format('c'),
+            'values'         => $values,
+            'ids' => $ids,
+            'createdAt' => $createdAt,
+            'updatedAt' => $updatedAt,
         ];
     }
 
-    private function validateEntities(TranslationGroup $group, Translation $en, Translation $pl): void
+    /**
+     * @param list<Translation> $translations
+     */
+    private function validateEntities(TranslationGroup $group, array $translations): void
     {
-        $errors = [
-            ...iterator_to_array($this->validator->validate($group)),
-            ...iterator_to_array($this->validator->validate($en)),
-            ...iterator_to_array($this->validator->validate($pl)),
-        ];
+        $errors = [...iterator_to_array($this->validator->validate($group))];
+
+        foreach ($translations as $translation) {
+            $errors = [
+                ...$errors,
+                ...iterator_to_array($this->validator->validate($translation)),
+            ];
+        }
 
         if (count($errors) > 0) {
             $messages = [];
@@ -203,5 +252,21 @@ final class TranslationService
             }
             throw new UnprocessableEntityHttpException(implode(' | ', $messages));
         }
+    }
+
+    private function legacyLocaleSuffix(string $locale): string
+    {
+        $parts = preg_split('/[^a-z0-9]+/i', strtolower($locale)) ?: [];
+        $suffix = '';
+
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+
+            $suffix .= ucfirst($part);
+        }
+
+        return $suffix;
     }
 }

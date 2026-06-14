@@ -21,7 +21,13 @@ security:
 
   access_control:
     - { path: ^/translation/health, roles: PUBLIC_ACCESS }
-    - { path: ^/translation/docs(?:\.json)?$, roles: PUBLIC_ACCESS }
+    - { path: ^/translation/docs(?:\.json)?$, roles: ROLE_ADMIN }
+    - { path: ^/translation/admin/security-log, roles: ROLE_ADMIN }
     - { path: ^/translation/admin, roles: ROLE_ADMIN }
     - { path: ^/translation/translations, methods: [GET], roles: ROLE_USER }
     - { path: ^/translation/, roles: ROLE_USER }
+
+when@prod:
+  security:
+    access_control:
+      - { path: ^/, requires_channel: https }

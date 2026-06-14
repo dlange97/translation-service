@@ -7,6 +7,7 @@ namespace App\Tests\Service;
 use App\Entity\Translation;
 use App\Entity\TranslationGroup;
 use App\Repository\TranslationRepository;
+use App\Service\Locale\LocaleStrategyInterface;
 use App\Service\TranslationService;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -22,15 +23,25 @@ final class TranslationServiceTest extends TestCase
     private TranslationRepository&MockObject $repo;
     private EntityManagerInterface&MockObject $em;
     private ValidatorInterface&MockObject $validator;
+    private LocaleStrategyInterface&MockObject $localeStrategy;
     private TranslationService $service;
+    /** @var list<string> */
+    private array $supportedLocales = ['en', 'pl'];
 
     protected function setUp(): void
     {
         $this->repo = $this->createMock(TranslationRepository::class);
         $this->em = $this->createMock(EntityManagerInterface::class);
         $this->validator = $this->createMock(ValidatorInterface::class);
+        $this->localeStrategy = $this->createMock(LocaleStrategyInterface::class);
 
-        $this->service = new TranslationService($this->repo, $this->em, $this->validator);
+        $this->localeStrategy->method('supportedLocales')->willReturnCallback(fn(): array => $this->supportedLocales);
+        $this->localeStrategy->method('defaultLocale')->willReturnCallback(fn(): string => $this->supportedLocales[0]);
+        $this->localeStrategy->method('normalizeRequestedLocale')->willReturnCallback(
+            fn(string $locale): string => in_array($locale, $this->supportedLocales, true) ? $locale : $this->supportedLocales[0],
+        );
+
+        $this->service = new TranslationService($this->repo, $this->em, $this->validator, $this->localeStrategy);
     }
 
     // --- getFlatMap ---
@@ -47,6 +58,11 @@ final class TranslationServiceTest extends TestCase
 
     public function testGetFlatMapDefaultsToEnForUnsupportedLocale(): void
     {
+        $this->localeStrategy->expects($this->once())
+            ->method('normalizeRequestedLocale')
+            ->with('de')
+            ->willReturn('en');
+
         $this->repo->expects($this->once())
             ->method('getFlatMapByLocale')
             ->with('en')
@@ -59,7 +75,7 @@ final class TranslationServiceTest extends TestCase
 
     public function testFindAllGroupedDelegatesToRepository(): void
     {
-        $this->repo->method('findAllGrouped')->willReturn([['key' => 'app.test']]);
+        $this->repo->method('findAllGrouped')->with(['en', 'pl'])->willReturn([['key' => 'app.test']]);
 
         $result = $this->service->findAllGrouped();
         $this->assertCount(1, $result);
@@ -88,12 +104,12 @@ final class TranslationServiceTest extends TestCase
         ]);
     }
 
-    public function testCreateThrowsWhenValuesEmpty(): void
+    public function testCreateThrowsWhenAnyRequiredLocaleIsEmpty(): void
     {
         $this->repo->method('hasAnyForKey')->willReturn(false);
 
         $this->expectException(UnprocessableEntityHttpException::class);
-        $this->expectExceptionMessage('Both translation values');
+        $this->expectExceptionMessage('locales: en, pl');
 
         $this->service->create([
             'translationKey' => 'app.new',
@@ -130,7 +146,7 @@ final class TranslationServiceTest extends TestCase
 
     public function testUpdateThrowsNotFoundWhenNoTranslations(): void
     {
-        $this->repo->method('findByLocaleAndKey')->willReturn(null);
+        $this->repo->method('findByKeyIndexedByLocale')->willReturn([]);
 
         $this->expectException(NotFoundHttpException::class);
 
@@ -143,11 +159,8 @@ final class TranslationServiceTest extends TestCase
         $en = (new Translation())->setLocale('en')->setGroup($group)->setTranslationValue('Old');
         $pl = (new Translation())->setLocale('pl')->setGroup($group)->setTranslationValue('Stare');
 
-        $this->repo->method('findByLocaleAndKey')
-            ->willReturnCallback(fn(string $locale) => match ($locale) {
-                'en' => $en,
-                'pl' => $pl,
-            });
+        $this->repo->method('findByKeyIndexedByLocale')
+            ->willReturn(['en' => $en, 'pl' => $pl]);
 
         $this->validator->method('validate')->willReturn(new ConstraintViolationList());
         $this->repo->expects($this->exactly(2))->method('save');
@@ -166,11 +179,10 @@ final class TranslationServiceTest extends TestCase
         $en = (new Translation())->setLocale('en')->setGroup($group)->setTranslationValue('Hi');
         $pl = (new Translation())->setLocale('pl')->setGroup($group)->setTranslationValue('Cześć');
 
-        $this->repo->method('findByLocaleAndKey')
-            ->willReturnCallback(fn(string $locale) => match ($locale) {
-                'en' => $en,
-                'pl' => $pl,
-            });
+        $this->repo->expects($this->once())
+            ->method('findByKeyIndexedByLocale')
+            ->with('app.hello world')
+            ->willReturn(['en' => $en, 'pl' => $pl]);
 
         $this->validator->method('validate')->willReturn(new ConstraintViolationList());
 
@@ -228,6 +240,17 @@ final class TranslationServiceTest extends TestCase
         $this->assertSame(['en' => 'Hello', 'pl' => 'Cześć'], $result);
     }
 
+    public function testExtractValuesSupportsAdditionalLocalesFromStrategy(): void
+    {
+        $this->supportedLocales = ['en', 'pl', 'de'];
+
+        $result = $this->service->extractValues([
+            'values' => ['en' => 'Hello', 'pl' => 'Cześć', 'de' => 'Hallo'],
+        ]);
+
+        $this->assertSame(['en' => 'Hello', 'pl' => 'Cześć', 'de' => 'Hallo'], $result);
+    }
+
     public function testExtractValuesReturnsEmptyStringsWhenMissing(): void
     {
         $result = $this->service->extractValues([]);
@@ -243,7 +266,7 @@ final class TranslationServiceTest extends TestCase
         $en = (new Translation())->setLocale('en')->setGroup($group)->setTranslationValue('Test');
         $pl = (new Translation())->setLocale('pl')->setGroup($group)->setTranslationValue('Test PL');
 
-        $result = $this->service->serializeGrouped('app.test', $en, $pl);
+        $result = $this->service->serializeGrouped('app.test', ['en' => $en, 'pl' => $pl]);
 
         $this->assertSame('app.test', $result['translationKey']);
         $this->assertSame('Test', $result['values']['en']);
@@ -256,10 +279,28 @@ final class TranslationServiceTest extends TestCase
 
     public function testSerializeGroupedHandlesNullTranslations(): void
     {
-        $result = $this->service->serializeGrouped('app.test', null, null);
+        $result = $this->service->serializeGrouped('app.test', []);
 
         $this->assertSame('', $result['values']['en']);
         $this->assertSame('', $result['values']['pl']);
         $this->assertNull($result['groupId']);
+    }
+
+    public function testCreateWithAdditionalLocaleRequiresAndPersistsAllSupportedLocales(): void
+    {
+        $this->supportedLocales = ['en', 'pl', 'de'];
+        $this->repo->method('hasAnyForKey')->willReturn(false);
+        $this->validator->method('validate')->willReturn(new ConstraintViolationList());
+
+        $this->repo->expects($this->exactly(3))->method('save');
+
+        $result = $this->service->create([
+            'translationKey' => 'app.welcome',
+            'values' => ['en' => 'Welcome', 'pl' => 'Witaj', 'de' => 'Willkommen'],
+        ]);
+
+        $this->assertSame('Welcome', $result['values']['en']);
+        $this->assertSame('Witaj', $result['values']['pl']);
+        $this->assertSame('Willkommen', $result['values']['de']);
     }
 }

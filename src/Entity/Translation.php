@@ -18,8 +18,6 @@ class Translation
 {
     use HasInstanceId;
 
-    public const SUPPORTED_LOCALES = ['en', 'pl'];
-
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: Types::INTEGER)]
@@ -27,7 +25,10 @@ class Translation
 
     #[ORM\Column(type: Types::STRING, length: 5)]
     #[Assert\NotBlank(message: 'Locale is required.')]
-    #[Assert\Choice(choices: self::SUPPORTED_LOCALES, message: 'Locale must be one of: en, pl.')]
+    #[Assert\Regex(
+        pattern: '/^[a-z]{2}(?:-[a-z]{2})?$/',
+        message: 'Locale must use format like "en", "pl" or "pt-br".',
+    )]
     private string $locale = 'en';
 
     #[ORM\ManyToOne(targetEntity: TranslationGroup::class)]
@@ -57,7 +58,7 @@ class Translation
 
     public function setLocale(string $locale): static
     {
-        $this->locale = $locale;
+        $this->locale = strtolower(trim($locale));
         return $this;
     }
 

@@ -60,16 +60,10 @@ class TranslationRepository extends ServiceEntityRepository
     }
 
     /**
-     * @return list<array{
-     *     groupId: int,
-     *     translationKey: string,
-     *     values: array{en: string, pl: string},
-     *     ids: array{en: int|null, pl: int|null},
-     *     createdAt: string|null,
-     *     updatedAt: string|null
-     * }>
+     * @param list<string> $supportedLocales
+     * @return list<array<string, mixed>>
      */
-    public function findAllGrouped(): array
+    public function findAllGrouped(array $supportedLocales): array
     {
         $rows = $this->createQueryBuilder('t')
             ->select(
@@ -87,8 +81,11 @@ class TranslationRepository extends ServiceEntityRepository
             ->getQuery()
             ->getArrayResult();
 
-        /** @var array<string, array{groupId: int, translationKey: string, values: array{en: string, pl: string}, ids: array{en: int|null, pl: int|null}, createdAt: string|null, updatedAt: string|null}> $grouped */
+        /** @var array<string, array<string, mixed>> $grouped */
         $grouped = [];
+
+        $baseValues = array_fill_keys($supportedLocales, '');
+        $baseIds = array_fill_keys($supportedLocales, null);
 
         foreach ($rows as $row) {
             $key = (string) ($row['translationKey'] ?? '');
@@ -100,8 +97,8 @@ class TranslationRepository extends ServiceEntityRepository
                 $grouped[$key] = [
                     'groupId' => (int) $row['groupId'],
                     'translationKey' => $key,
-                    'values' => ['en' => '', 'pl' => ''],
-                    'ids' => ['en' => null, 'pl' => null],
+                    'values' => $baseValues,
+                    'ids' => $baseIds,
                     'createdAt' => null,
                     'updatedAt' => null,
                 ];
@@ -109,7 +106,8 @@ class TranslationRepository extends ServiceEntityRepository
 
             $locale = strtolower(trim((string) ($row['locale'] ?? '')));
             if (!isset($grouped[$key]['values'][$locale])) {
-                continue;
+                $grouped[$key]['values'][$locale] = '';
+                $grouped[$key]['ids'][$locale] = null;
             }
 
             $grouped[$key]['values'][$locale] = (string) ($row['translationValue'] ?? '');
@@ -129,6 +127,31 @@ class TranslationRepository extends ServiceEntityRepository
         }
 
         return array_values($grouped);
+    }
+
+    /**
+     * @return array<string, Translation>
+     */
+    public function findByKeyIndexedByLocale(string $key): array
+    {
+        $rows = $this->createQueryBuilder('t')
+            ->join('t.group', 'g')
+            ->where('g.translationKey = :key')
+            ->setParameter('key', $key)
+            ->orderBy('t.locale', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        $grouped = [];
+        foreach ($rows as $row) {
+            if (!$row instanceof Translation) {
+                continue;
+            }
+
+            $grouped[strtolower($row->getLocale())] = $row;
+        }
+
+        return $grouped;
     }
 
     /** @return array{en: ?Translation, pl: ?Translation} */
