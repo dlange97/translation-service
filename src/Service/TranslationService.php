@@ -112,8 +112,8 @@ final class TranslationService
         $values = $this->extractValues($data);
         $locales = $this->localeStrategy->supportedLocales();
 
-        $sampleTranslation = reset($existingByLocale);
-        $translationGroup = $sampleTranslation instanceof Translation ? $sampleTranslation->getGroup() : null;
+        $firstLocale = array_key_first($existingByLocale);
+        $translationGroup = $existingByLocale[$firstLocale]->getGroup();
         if ($translationGroup === null) {
             throw new NotFoundHttpException('Translation group not found.');
         }
