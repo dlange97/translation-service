@@ -3,12 +3,13 @@ FROM php:8.3-fpm-alpine
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 RUN apk add --no-cache icu-dev libzip-dev openssl bash $PHPIZE_DEPS \
-    && pecl install pcov \
-    && docker-php-ext-enable pcov \
+    && pecl install pcov xdebug \
+    && docker-php-ext-enable pcov xdebug \
     && docker-php-ext-install intl pdo_mysql zip opcache \
     && apk del $PHPIZE_DEPS
 
 COPY docker/php/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
+COPY docker/php/xdebug.ini /usr/local/etc/php/conf.d/xdebug.ini
 
 WORKDIR /app
 
